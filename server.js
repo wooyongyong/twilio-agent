@@ -40,15 +40,26 @@ wss.on("connection", (twilioWS) => {
   console.log("[WS] Twilio connected");
 
   const openaiWS = new WebSocket(
-    "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview",
-    {
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "OpenAI-Beta": "realtime=v1",          // ✅ 필수
-        "OpenAI-Beta-Agent-Id": process.env.AGENT_ID
-      }
+  "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview",
+  {
+    headers: {
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, // sk-...
+      "OpenAI-Beta": "realtime=v1",                          // ✅ 필수
+      "OpenAI-Beta-Agent-Id": process.env.AGENT_ID           // ✅ agt-...
     }
-  );
+  }
+);
+openaiWS.on("open", () => {
+  console.log("[WS] OpenAI connected");
+  openaiWS.send(JSON.stringify({
+    type: "session.update",
+    session: {
+      voice: "amber",
+      input_audio_format: "g711_ulaw",
+      output_audio_format: "g711_ulaw"
+    }
+  }));
+});
 
   openaiWS.on("open", () => {
     console.log("[WS] OpenAI connected");
