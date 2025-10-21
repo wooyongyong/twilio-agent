@@ -58,14 +58,15 @@ wss.on("connection", async (twilioWS) => {
 
   // OpenAI Realtime(Agent Builder의 Agent로 연결)
   const openaiWS = new WebSocket(
-    "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview",
-    {
-      headers: {
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-        "OpenAI-Beta-Agent-Id": AGENT_ID,
-      },
+  "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview",
+  {
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      "OpenAI-Beta": "realtime=v1",            // ✅ 추가
+      "OpenAI-Beta-Agent-Id": AGENT_ID
     }
-  );
+  }
+);
 
   // 세션 파라미터: 한국어/전화망 코덱 맞춤
   openaiWS.on("open", () => {
