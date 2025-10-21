@@ -1,92 +1,95 @@
 import express from "express";
-import { WebSocketServer } from "ws";
-const app = express();
-app.set("trust proxy", true); // ✅ Railway 프록시 신뢰
+import { WebSocketServer, WebSocket } from "ws";
 
-// === 1️⃣ Twilio Voice Webhook ===
+const app = express();
+app.set("trust proxy", true);                // ✅ Railway 프록시 신뢰
+
+// 헬스체크
+app.get("/", (_req, res) => res.status(200).send("ok"));
+
+// 1) TwiML: 즉시 반환 (지연 금지)
 app.post("/voice", (req, res) => {
-  const domain = process.env.RAILWAY_URL || req.headers.host;
+  const host = req.headers.host;
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
-    <Stream url="wss://${domain}/twilio-media-stream" track="inbound_track"/>
+    <Stream url="wss://${host}/twilio-media-stream"/>
   </Connect>
 </Response>`;
-  console.log("[TwiML] Responding with TwiML for domain:", domain);
-  res.type("text/xml").send(twiml);
+  res.type("text/xml").status(200).send(twiml);
 });
 
-// === 2️⃣ WebSocket Upgrade ===
 const server = app.listen(process.env.PORT || 3000, () =>
-  console.log("✅ Server listening on port", process.env.PORT || 3000)
+  console.log("listening on", process.env.PORT || 3000)
 );
 
+// 2) WS 업그레이드 (쿼리 허용)
 const wss = new WebSocketServer({ noServer: true });
-
 server.on("upgrade", (req, socket, head) => {
-  if (req.url.startsWith("/twilio-media-stream")) {
-    console.log("[UPGRADE] Twilio media stream upgrade request");
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      console.log("[UPGRADE] Upgrade successful ✅");
-      wss.emit("connection", ws, req);
-    });
+  const url = req.url || "";
+  if (url.startsWith("/twilio-media-stream")) {
+    console.log("[UPGRADE]", url);
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
   } else {
     socket.destroy();
   }
 });
 
-// === 3️⃣ Twilio ↔ OpenAI Realtime Bridge ===
-wss.on("connection", async (twilioWS) => {
-  console.log("[WS] Twilio connected ✅");
+// 3) Twilio <-> OpenAI 브릿지
+wss.on("connection", (twilioWS) => {
+  console.log("[WS] Twilio connected");
 
   const openaiWS = new WebSocket(
     "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview",
     {
       headers: {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "OpenAI-Beta": "realtime=v1", // ✅ 필수
-        "OpenAI-Beta-Agent-Id": process.env.AGENT_ID,
-      },
+        "OpenAI-Beta": "realtime=v1",          // ✅ 필수
+        "OpenAI-Beta-Agent-Id": process.env.AGENT_ID
+      }
     }
   );
 
-  openaiWS.on("open", () => console.log("[WS] OpenAI connected ✅"));
-  openaiWS.on("error", (err) => console.error("[WS] OpenAI Error ❌", err.message));
-  openaiWS.on("close", (code, reason) =>
-    console.log("[WS] OpenAI Closed:", code, reason.toString())
-  );
+  openaiWS.on("open", () => {
+    console.log("[WS] OpenAI connected");
+    openaiWS.send(JSON.stringify({
+      type: "session.update",
+      session: {
+        voice: "amber",
+        input_audio_format: "g711_ulaw",
+        output_audio_format: "g711_ulaw",
+        instructions: "Respond in Korean unless the caller speaks English. Keep the first greeting short."
+      }
+    }));
+  });
 
+  let sid = null;
   twilioWS.on("message", (raw) => {
     const evt = JSON.parse(raw.toString());
-    if (evt.event === "start") {
-      twilioWS._sid = evt.start.streamSid;
-      console.log("[Twilio] Stream started:", twilioWS._sid);
-    } else if (evt.event === "media") {
-      openaiWS.send(
-        JSON.stringify({
-          type: "input_audio_buffer.append",
-          audio: evt.media.payload,
-        })
-      );
+    if (evt.event === "start") sid = evt.start.streamSid;
+    else if (evt.event === "media") {
+      if (openaiWS.readyState === WebSocket.OPEN) {
+        openaiWS.send(JSON.stringify({ type: "input_audio_buffer.append", audio: evt.media.payload }));
+      }
     } else if (evt.event === "stop") {
-      console.log("[Twilio] Stream stopped");
-      openaiWS.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
-      openaiWS.send(JSON.stringify({ type: "response.create" }));
-      twilioWS.close();
-      openaiWS.close();
+      if (openaiWS.readyState === WebSocket.OPEN) {
+        openaiWS.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
+        openaiWS.send(JSON.stringify({ type: "response.create" }));
+      }
+      openaiWS.close(); twilioWS.close();
     }
   });
 
   openaiWS.on("message", (msg) => {
     const data = JSON.parse(msg.toString());
-    if (data.type === "output_audio_buffer.delta" && data.audio) {
-      twilioWS.send(
-        JSON.stringify({
-          event: "media",
-          streamSid: twilioWS._sid,
-          media: { payload: data.audio },
-        })
-      );
+    if (data.type === "output_audio_buffer.delta" && data.audio && sid && twilioWS.readyState === WebSocket.OPEN) {
+      twilioWS.send(JSON.stringify({ event: "media", streamSid: sid, media: { payload: data.audio } }));
     }
   });
+
+  const cleanup = () => { try { openaiWS.close(); } catch {} try { twilioWS.close(); } catch {} };
+  twilioWS.on("close", cleanup);
+  openaiWS.on("close", cleanup);
+  twilioWS.on("error", (e) => console.error("[WS] Twilio error:", e.message));
+  openaiWS.on("error", (e) => console.error("[WS] OpenAI error:", e.message));
 });
