@@ -37,11 +37,15 @@ const server = app.listen(PORT, () =>
 const wss = new WebSocketServer({ noServer: true });
 
 server.on("upgrade", (req, socket, head) => {
-  if (req.url === "/twilio-media-stream") {
-    wss.handleUpgrade(req, socket, head, (ws) =>
-      wss.emit("connection", ws, req)
-    );
+  const url = req.url || "";
+  // Twilio가 실제로 /twilio-media-stream?streamSid=xxxxx 형태로 요청함
+  if (url.startsWith("/twilio-media-stream")) {
+    console.log("[UPGRADE] Twilio media stream connected:", url);
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit("connection", ws, req);
+    });
   } else {
+    console.log("[UPGRADE] rejected non-media connection:", url);
     socket.destroy();
   }
 });
