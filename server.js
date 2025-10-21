@@ -13,6 +13,8 @@ if (!OPENAI_API_KEY || !AGENT_ID) {
 }
 
 const app = express();
+app.set('trust proxy', true); // 🔥 Railway에서 WebSocket 프록시 허용
+
 
 /** 0) Health check (브라우저/로드밸런서 확인용) */
 app.get("/", (_req, res) => res.status(200).send("ok"));
