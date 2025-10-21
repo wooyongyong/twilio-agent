@@ -1,8 +1,5 @@
 import express from "express";
 import { WebSocketServer } from "ws";
-import dotenv from "dotenv";
-
-dotenv.config();
 const app = express();
 app.set("trust proxy", true); // ✅ Railway 프록시 신뢰
 
