@@ -98,7 +98,6 @@ wss.on("connection", (twilioWS, req) => {
     openaiWS.send(JSON.stringify({
       type: "session.update",
       session: {
-        voice: "amber",
         // Twilio <Stream>은 8kHz μ-law
         input_audio_format: "g711_ulaw",
         output_audio_format: "g711_ulaw",
