@@ -14,7 +14,7 @@ app.post("/voice", (req, res) => {
   res.type("text/xml").status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
-    <Stream url="wss://${host}/twilio-media-stream"/>
+    <Stream url="wss://${host}/twilio-media-stream" track="both_tracks"/>
   </Connect>
 </Response>`);
 });
